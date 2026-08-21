@@ -12,9 +12,11 @@ Optimize for understanding per line of code and configuration.
 
 Prefer one observable concept per commit. Keep each diff small enough to read comfortably before proceeding.
 
-Default target: no more than 100 meaningful added lines per commit. Generated files, lock files, exported NiFi definitions, and machine-generated metadata must be reported separately and must not be used to hide complexity.
+Default implementation diff target: no more than 100 meaningful added lines of executable code or hand-written configuration per learning commit.
 
-If a change needs substantially more than 100 meaningful lines, split it or explain why the extra complexity is necessary to teach the concept.
+The implementation diff budget does **not** apply to prompts, research findings, documentation/notes, data fixtures, lock files, generated files, exported NiFi definitions, or machine-generated metadata. These should still be kept purposeful and readable, and generated material must be reported separately rather than used to hide implementation complexity.
+
+If an implementation change needs substantially more than 100 meaningful lines, split it or explain why the extra complexity is necessary to teach the concept.
 
 ## Build Style
 
