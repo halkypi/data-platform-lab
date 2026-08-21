@@ -12,7 +12,7 @@ The initial architecture remains substantially sound, but the reconciliation cha
 
 1. **Keep Apache NiFi, but treat its runtime/bootstrap burden as material.** NiFi 2.11.x brings Java/runtime repositories, generated state, HTTPS/security configuration, and extension/NAR packaging concerns. It still earns its place because FlowFiles, queues, routing, backpressure, and provenance are explicit learning objectives. See the [NiFi User Guide](https://nifi.apache.org/nifi-docs/user-guide.html), [Administration Guide](https://nifi.apache.org/nifi-docs/administration-guide.html), and [downloads page](https://nifi.apache.org/download/).
 2. **Do not conflate NiFi recovery mechanisms.** HTTP outcome routing, configured retry, queue backpressure, provenance replay, and idempotency are distinct concepts. [`InvokeHTTP`](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/) and the [NiFi User Guide](https://nifi.apache.org/nifi-docs/user-guide.html) support those distinctions.
-3. **Make NiFi→Parquet a hard evidence gate.** Apache provides the relevant primitives, including [`InvokeHTTP`](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/), [`ConvertRecord`](https://nifi.apache.org/components/org.apache.nifi.processors.standard.ConvertRecord/), [`PutFile`](https://nifi.apache.org/components/org.apache.nifi.processors.standard.PutFile/), JSON record readers, and the [NiFi 2.11 Parquet bundle](https://github.com/apache/nifi/tree/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle). But no authoritative current assembled tiny HTTP/JSON→Parquet flow was found, and Apache warns that the standard binary does not include every release NAR. **No reliable authoritative example found.**
+3. **Keep NiFi→Parquet as a hard evidence gate.** Targeted follow-up identifies the candidate component path as `InvokeHTTP(Response) → ConvertRecord(JsonTreeReader: Infer Schema, ParquetRecordSetWriter: Inherit Record Schema) → PutFile`. Apache documents the individual behaviors, but the exact 2.11.0 [assembly POM](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-assembly/pom.xml) places `nifi-parquet-nar` in the inactive `include-hadoop` build profile rather than the standard binary assembly. No authoritative assembled flow was found, so clean pinned-distribution and extension verification remains required. **No reliable authoritative example found.**
 4. **Keep Parquet before Iceberg, and Iceberg before a remote catalog.** The [Apache Parquet file-format documentation](https://parquet.apache.org/docs/file-format/) exposes the physical file structure. The [Apache Iceberg specification](https://iceberg.apache.org/spec/) then makes table state inspectable through metadata, snapshots, manifest lists, manifests, and data files.
 5. **Keep PyIceberg + SQLite + `file://` as the first real Iceberg implementation.** Apache's [PyIceberg documentation](https://py.iceberg.apache.org/) demonstrates this as a legitimate local demonstration/testing topology without a separate catalog service or object store.
 6. **Strengthen the DuckDB↔PyIceberg conclusion.** DuckDB documents direct catalog-free Iceberg reads, and the upstream [`duckdb/duckdb-iceberg`](https://github.com/duckdb/duckdb-iceberg) test corpus exercises Iceberg data created through PyIceberg using a SQLite SQL catalog and local `file://` warehouse. Direct-path access is read-only, and the extension remains version-sensitive/experimental. See [DuckDB Iceberg](https://duckdb.org/docs/current/core_extensions/iceberg/overview).
@@ -20,6 +20,26 @@ The initial architecture remains substantially sound, but the reconciliation cha
 8. **Do not make Lakekeeper the assumed first REST-catalog implementation.** Lakekeeper is a legitimate later catalog service, but its current documentation requires external object storage for a warehouse and its supported setup introduces PostgreSQL plus bootstrap/migration/service concerns. See [Lakekeeper storage](https://docs.lakekeeper.io/docs/latest/storage/) and [getting started](https://docs.lakekeeper.io/getting-started/).
 9. **Evaluate Apache Iceberg's REST test fixture before Lakekeeper.** Apache maintains [`RESTCatalogServer`](https://github.com/apache/iceberg/blob/c07a081c8ab8687cd0531101db64922f6dbb2de6/open-api/src/testFixtures/java/org/apache/iceberg/rest/RESTCatalogServer.java), whose server defaults can use SQLite and temporary local filesystem storage. DuckDB uses the Apache fixture as an integration target upstream, but the exact DuckDB + fixture + local-filesystem assembled path is still unclosed. **No reliable authoritative example found.**
 10. **Keep object storage, MinIO, and Delta Sharing deferred.** Lakekeeper documents Minio-tested S3 compatibility, but that does not make MinIO the right current lab default; the official [`minio/minio`](https://github.com/minio/minio) repository is no longer maintained in its historical community-server form. Delta Sharing has an official protocol/reference implementation, but no authoritative filesystem-only binding for this exact lab was found. See [`delta-io/delta-sharing`](https://github.com/delta-io/delta-sharing).
+
+## Targeted NiFi Evidence Update
+
+A targeted follow-up examined the exact NiFi 2.11.0 JSON→Parquet question. It materially narrows the candidate flow but does **not** close the implementation gate.
+
+**Supported component behavior:** [`InvokeHTTP`](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/) can emit a successful HTTP response FlowFile; [`ConvertRecord`](https://nifi.apache.org/components/org.apache.nifi.processors.standard.ConvertRecord/) converts records through configured reader/writer services; [`JsonTreeReader`](https://nifi.apache.org/components/org.apache.nifi.json.JsonTreeReader/) supports schema inference over a root JSON array; the 2.11.0 [`ParquetRecordSetWriter`](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle/nifi-parquet-processors/src/main/java/org/apache/nifi/parquet/ParquetRecordSetWriter.java) writes a RecordSet as Parquet; and [`PutFile`](https://nifi.apache.org/components/org.apache.nifi.processors.standard.PutFile/) persists FlowFile content to a local directory.
+
+**Candidate configuration from the follow-up:**
+
+```text
+InvokeHTTP (Response relationship)
+  → ConvertRecord
+      reader: JsonTreeReader (Infer Schema)
+      writer: ParquetRecordSetWriter (Inherit Record Schema)
+  → PutFile
+```
+
+**Packaging correction:** the follow-up report stated that all required NARs are present in a stock NiFi 2.11.0 install. Apache's exact release source does not support that claim. The standard assembly includes `nifi-standard-nar` and `nifi-record-serialization-services-nar`, but `nifi-parquet-nar` appears only under the `include-hadoop` profile, which is inactive by default. Apache's 2.11.0 [Developer Guide build options](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-docs/src/main/asciidoc/developer-guide.adoc) describe that profile as adding Hadoop, HDFS, and Parquet components; the [assembly POM](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-assembly/pom.xml) confirms the dependency placement. The Parquet NAR itself depends on `nifi-hadoop-libraries-nar`, as shown in its [release POM](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle/nifi-parquet-nar/pom.xml).
+
+**Evidence status:** component behavior and a plausible schema handoff are better established, but the stock-distribution claim is overturned and no Apache-assembled reference flow was found. **No reliable authoritative example found.** R1 remains **OPEN / HIGH / BLOCKING** pending a supported extension-packaging path and clean NiFi 2.11.0 empirical verification.
 
 ## Recommended Minimal Architecture
 
@@ -71,7 +91,7 @@ The core conceptual distinctions remain **responsibility boundaries rather than 
 | Application contract | **Pydantic** | **INCLUDE** | Teaches application-boundary validation and typed Python objects. | [Pydantic models](https://docs.pydantic.dev/latest/concepts/models/) |
 | Transport | **HTTP + JSON** | **INCLUDE** | Inspectable with `curl`; nearly zero infrastructure. | [FastAPI request body](https://fastapi.tiangolo.com/tutorial/body/), [NiFi InvokeHTTP](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/) |
 | Ingestion / movement | **Apache NiFi 2.11.x** | **INCLUDE** | Explicitly exposes FlowFiles, queues/connections, routing, backpressure and provenance. Runtime/bootstrap burden is material and must be reported rather than hidden. | [NiFi User Guide](https://nifi.apache.org/nifi-docs/user-guide.html), [Administration Guide](https://nifi.apache.org/nifi-docs/administration-guide.html), [downloads](https://nifi.apache.org/download/) |
-| NiFi analytical-file write | **NiFi → Parquet → filesystem** | **INCLUDE / HARD-GATED** | Required component primitives exist upstream, but the current assembled path and exact NAR packaging are not closed. Do not implement by inference. | [InvokeHTTP](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/), [ConvertRecord](https://nifi.apache.org/components/org.apache.nifi.processors.standard.ConvertRecord/), [PutFile](https://nifi.apache.org/components/org.apache.nifi.processors.standard.PutFile/), [2.11 Parquet bundle](https://github.com/apache/nifi/tree/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle) |
+| NiFi analytical-file write | **NiFi → Parquet → filesystem** | **INCLUDE / HARD-GATED** | The candidate component/schema path is documented, but `nifi-parquet-nar` is outside the default standard assembly under the inactive `include-hadoop` profile, and no official assembled flow exists. | [InvokeHTTP](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/), [ConvertRecord](https://nifi.apache.org/components/org.apache.nifi.processors.standard.ConvertRecord/), [JsonTreeReader](https://nifi.apache.org/components/org.apache.nifi.json.JsonTreeReader/), [Parquet writer source](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle/nifi-parquet-processors/src/main/java/org/apache/nifi/parquet/ParquetRecordSetWriter.java), [PutFile](https://nifi.apache.org/components/org.apache.nifi.processors.standard.PutFile/), [2.11.0 assembly](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-assembly/pom.xml) |
 | Enterprise analogue | **Snowflake Openflow runtime** | **REJECT** | Local runtime unnecessary. Keep only a shallow NiFi mental-model mapping. | [Snowflake Openflow](https://docs.snowflake.com/en/user-guide/data-integration/openflow/about) |
 | Analytical file format | **Apache Parquet** | **INCLUDE** | Makes JSON bytes vs analytical columnar file concrete. | [Parquet format](https://parquet.apache.org/docs/file-format/), [metadata](https://parquet.apache.org/docs/file-format/metadata/) |
 | First physical storage | **Local filesystem** | **INCLUDE** | Smallest and most inspectable physical-storage substrate. | [PyIceberg](https://py.iceberg.apache.org/) |
@@ -150,7 +170,7 @@ The table distinguishes authoritative component/capability evidence from an asse
 | Requested combination | Authoritative precedent | Assessment |
 |---|---|---|
 | **NiFi + HTTP** | [Apache NiFi InvokeHTTP](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/) | **Supported upstream capability.** |
-| **NiFi + Parquet** | [ConvertRecord](https://nifi.apache.org/components/org.apache.nifi.processors.standard.ConvertRecord/), [PutFile](https://nifi.apache.org/components/org.apache.nifi.processors.standard.PutFile/), [NiFi 2.11 Parquet bundle](https://github.com/apache/nifi/tree/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle) | Component-level support is authoritative. For a current tiny assembled HTTP/JSON→Parquet flow and exact distribution/NAR path: **No reliable authoritative example found.** |
+| **NiFi + Parquet** | Apache documents the candidate path `InvokeHTTP(Response) → ConvertRecord(JsonTreeReader: Infer Schema, ParquetRecordSetWriter: Inherit Record Schema) → PutFile`. The exact 2.11.0 assembly places `nifi-parquet-nar` under inactive `include-hadoop`, not the standard binary. | **Component/schema evidence strengthened; packaging and runtime assembly remain open.** For a current tiny authoritative assembled flow: **No reliable authoritative example found.** |
 | **DuckDB + Parquet** | [DuckDB Parquet overview](https://duckdb.org/docs/current/data/parquet/overview), [metadata functions](https://duckdb.org/docs/current/data/parquet/metadata) | **Strong canonical runnable precedent.** |
 | **PyIceberg local table** | [PyIceberg](https://py.iceberg.apache.org/) | **Strong canonical precedent** for SQL catalog + SQLite + `file://` demo/testing topology. |
 | **PyIceberg → DuckDB direct Iceberg read** | [DuckDB Iceberg overview](https://duckdb.org/docs/current/core_extensions/iceberg/overview), [`duckdb/duckdb-iceberg`](https://github.com/duckdb/duckdb-iceberg) | **Direct upstream cross-implementation precedent.** DuckDB upstream tests use PyIceberg-created local tables. Direct path is read-only. |
@@ -253,12 +273,12 @@ The sequence follows the repository's required `propose → implement → commit
 **Complexity:** **tiny**.
 
 **Stage:** NiFi→Parquet evidence gate  
-**New concept:** Research evidence must close an integration before implementation.  
-**Technology:** NiFi 2.11.x component/extension set.  
-**Observable result:** Before any file-writing commit, the orchestrator can identify the exact supported processors, reader/writer controller services, and required NARs for the pinned distribution from authoritative evidence.  
-**What to inspect:** Pinned release source/docs, installed/available NARs, processor/controller-service documentation.  
-**Authoritative example:** Component-level sources exist: [InvokeHTTP](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/), [ConvertRecord](https://nifi.apache.org/components/org.apache.nifi.processors.standard.ConvertRecord/), [PutFile](https://nifi.apache.org/components/org.apache.nifi.processors.standard.PutFile/), [2.11 Parquet bundle](https://github.com/apache/nifi/tree/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle). For the exact assembled flow: **No reliable authoritative example found.**  
-**Complexity:** **research gate, not implementation**. **STOP if unclosed.**
+**New concept:** Supported components do not by themselves prove that the default distribution contains the required extension or that the assembled flow works.  
+**Technology:** NiFi 2.11.0 standard components plus optional Parquet/Hadoop extension set.  
+**Observable result:** Before any file-writing commit, the orchestrator verifies the exact supported NAR acquisition/build path and demonstrates the candidate flow on a clean pinned NiFi 2.11.0 runtime.  
+**What to inspect:** `InvokeHTTP` Response output, `JsonTreeReader` inferred schema, `ParquetRecordSetWriter` inherited schema, `ConvertRecord` failures, installed NARs, Parquet output, and `PutFile` result.  
+**Authoritative example:** Apache documents the components and release assembly: [InvokeHTTP](https://nifi.apache.org/components/org.apache.nifi.processors.standard.InvokeHTTP/), [ConvertRecord](https://nifi.apache.org/components/org.apache.nifi.processors.standard.ConvertRecord/), [JsonTreeReader](https://nifi.apache.org/components/org.apache.nifi.json.JsonTreeReader/), [Parquet writer source](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-extension-bundles/nifi-parquet-bundle/nifi-parquet-processors/src/main/java/org/apache/nifi/parquet/ParquetRecordSetWriter.java), [PutFile](https://nifi.apache.org/components/org.apache.nifi.processors.standard.PutFile/), and [2.11.0 assembly POM](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-assembly/pom.xml). For an assembled flow: **No reliable authoritative example found.**  
+**Complexity:** **research/verification gate, not lab implementation**. **STOP if unclosed.**
 
 **Stage:** First analytical file  
 **New concept:** JSON payload ≠ Parquet file.  
@@ -390,7 +410,7 @@ A future object-store choice should be made against **then-current** upstream ev
 
 ## Risks / Weak Evidence
 
-**HARD GATE — NiFi → Parquet assembled path.** Apache sources establish the required primitives, but the exact NiFi 2.11.x processor/controller-service/NAR assembly for the intended tiny HTTP/JSON→Parquet→filesystem flow is not closed. The [Administration Guide](https://nifi.apache.org/nifi-docs/administration-guide.html) warns that the standard binary does not include every release NAR. **No reliable authoritative example found.** An orchestrator must stop before this implementation stage unless a separate approved evidence check closes the exact pinned path.
+**HARD GATE — NiFi → Parquet packaging and runtime path.** Targeted follow-up now identifies a plausible component/schema chain: `InvokeHTTP(Response) → ConvertRecord(JsonTreeReader: Infer Schema, ParquetRecordSetWriter: Inherit Record Schema) → PutFile`. However, Apache's exact 2.11.0 [assembly POM](https://github.com/apache/nifi/blob/rel/nifi-2.11.0/nifi-assembly/pom.xml) places `nifi-parquet-nar` under the inactive `include-hadoop` profile, not the standard assembly, and no official assembled flow was found. **No reliable authoritative example found.** The orchestrator must stop until a supported NAR path and clean-runtime verification close the gate.
 
 **NiFi runtime burden is material.** Java 21 for NiFi 2.11.0, persistent repositories, generated `flow.json.gz`, HTTPS/security defaults and NAR packaging all increase bootstrap context. This is accepted because the requested learning objectives explicitly include queues, backpressure and provenance; it should not be disguised as a “tiny” dependency.
 
@@ -467,7 +487,7 @@ This decomposition is a **proposed lab design**, not a claim that production sys
 
 The orchestrator must preserve these stop conditions:
 
-**STOP before NiFi→Parquet** unless the exact pinned NiFi distribution supports every required processor, reader, writer and NAR through authoritative evidence. Component existence alone does not authorize assembly. For the current assembled path: **No reliable authoritative example found.**
+**STOP before NiFi→Parquet.** The candidate processor and schema path is now documented, but the standard NiFi 2.11.0 assembly does not include `nifi-parquet-nar` by default. Do not proceed until the supported extension/build path is identified and a clean pinned runtime verifies the complete flow and valid Parquet output. Component existence alone does not authorize assembly. **No reliable authoritative example found.**
 
 **Do not add object storage** until the learner can explain a Parquet file on the filesystem and object-store semantics become either the explicit lesson or a justified prerequisite for a later component.
 
@@ -514,15 +534,20 @@ Decision checkpoints remain behavioral rather than “did it run?”
 
 ## Remaining Evidence Gaps
 
-### R1 — NiFi 2.11.x JSON→Parquet path
+### R1 — NiFi 2.11.0 JSON→Parquet packaging and runtime verification
 
-**Precise question:** For the pinned Apache NiFi 2.11.x distribution intended for this lab, are `InvokeHTTP`, `ConvertRecord`, the intended JSON reader, `ParquetRecordSetWriter`, and `PutFile` all available in a supported installation path, and is there enough authoritative Apache evidence to assemble that flow without invention?
+**Established:** Apache primary sources support the candidate chain `InvokeHTTP(Response) → ConvertRecord(JsonTreeReader: Infer Schema, ParquetRecordSetWriter: Inherit Record Schema) → PutFile`.
 
-**Why it matters:** blocks the first persisted analytical-file stage.
+**Corrected packaging fact:** `nifi-standard-nar` and `nifi-record-serialization-services-nar` are part of the standard assembly, but `nifi-parquet-nar` is included only by the inactive `include-hadoop` profile and depends on `nifi-hadoop-libraries-nar`. The targeted report's “stock install” claim is therefore not supported by the exact release source.
 
-**Preferred sources:** Apache NiFi 2.11.x component docs, release source tree, NAR/bundle definitions, official examples/tests, Administration Guide.
+**Remaining question:** What is the smallest supported way to supply the required 2.11.0 Parquet/Hadoop NARs, and does the complete candidate flow work on a clean pinned runtime with the lab's root JSON array and schema?
 
-**Evidence sufficient to close:** an Apache-provided runnable/test path or exact upstream evidence establishing the processor/controller-service/NAR assembly for the pinned release.
+**Evidence sufficient to close:** both:
+
+1. authoritative Apache evidence for the exact NAR acquisition or release-build path; and
+2. a separately approved clean-runtime verification that records the pinned distribution, installed NARs, processor relationships, schema strategies, output validation, and failure behavior.
+
+**Failure condition:** if closure requires an unsupported/custom extension path or disproportionate Hadoop packaging, reconsider whether NiFi should write Parquet rather than merely expose ingestion/queue/provenance.
 
 **Status:** **OPEN / HIGH / BLOCKING**. **No reliable authoritative example found.**
 
@@ -573,17 +598,17 @@ This reconciled brief should not inherit the initial `95/100` self-score unchang
 | Dimension | Score | Assessment |
 |---|---:|---|
 | **Scope coverage** | **25 / 25** | All original candidates, missing concepts, deferred technologies, requested integrations, material Challenger findings, and remaining evidence gaps are represented. |
-| **Evidence integrity and claim-source fit** | **27 / 30** | Primary-source grounding is strong. Deductions remain for the unclosed NiFi→Parquet assembled path and the unclosed DuckDB + Apache REST fixture + local-filesystem path. The brief explicitly refuses to infer either integration. |
+| **Evidence integrity and claim-source fit** | **27 / 30** | Primary-source grounding is strong. Deductions remain for the unclosed NiFi→Parquet extension-packaging/runtime path and the unclosed DuckDB + Apache REST fixture + local-filesystem path. The brief explicitly refuses to infer either integration. |
 | **Decision relevance** | **20 / 20** | Reconciliation changes concrete architecture/stage decisions: NiFi→Parquet is a hard gate; recovery semantics are separated; DuckDB/PyIceberg evidence is strengthened; Lakekeeper is moved later; Apache REST fixture becomes the preferred candidate; object storage becomes an explicit prerequisite for Lakekeeper. |
 | **Critical challenge and minimality** | **15 / 15** | NiFi complexity is accepted only because it teaches requested state; Lakekeeper is challenged against Apache's smaller fixture; object storage remains deferred; no replacement product is added merely because it is common. |
 | **Learning and orchestrator utility** | **9 / 10** | The sequence is Git-sized and evidence-gated, but the orchestrator still cannot cross the NiFi→Parquet stage until R1 closes. The remote-catalog stage is also intentionally unresolved. |
 | **Total** | **96 / 100** | High-quality reconciled evidence state, but **not implementation-ready** because a HIGH integration gate remains open. |
 
-**Known evidence gaps:** R1 NiFi 2.11.x assembled JSON→Parquet path; R2 DuckDB + Apache REST fixture + local filesystem; R3 ongoing DuckDB Iceberg version sensitivity; later object-store selection; later fully local Delta Sharing route.
+**Known evidence gaps:** R1 NiFi 2.11.0 supported Parquet-NAR packaging and clean-runtime verification; R2 DuckDB + Apache REST fixture + local filesystem; R3 ongoing DuckDB Iceberg version sensitivity; later object-store selection; later fully local Delta Sharing route.
 
 **Hard-gate concerns:**
 
-- **FAIL / OPEN:** NiFi→Parquet cannot be implemented until R1 closes.
+- **FAIL / OPEN:** NiFi→Parquet cannot be implemented until R1 closes the supported optional-NAR path and clean-runtime verification.
 - **OPEN but later:** no concrete first REST-catalog implementation is authorized until R2 or an equivalent authoritative path closes.
 - All unsupported combinations are explicitly blocked rather than filled with inferred recipes.
 
