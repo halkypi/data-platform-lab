@@ -6,6 +6,10 @@ This repository is a learning lab for understanding a modern data platform by bu
 
 The learner reviews every meaningful Git commit in Magit before continuing. Git history is part of the curriculum.
 
+Read `docs/learning-governance.md` before planning or implementing learning work. It defines the human gate, metrics, critical-collaboration rules, documentation responsibilities, and learning constraints.
+
+Before meaningful repository writes, summarize the proposed purpose, files affected, important decisions, and expected complexity. Ask when consequential requirements are ambiguous. Do not assume the learner's proposed approach is correct; challenge unsupported assumptions or unnecessary complexity. Wait for approval unless review is explicitly waived.
+
 ## Core Rule
 
 Optimize for understanding per line of code and configuration.
@@ -14,7 +18,7 @@ Prefer one observable concept per commit. Keep each diff small enough to read co
 
 Default implementation diff target: no more than 100 meaningful added lines of executable code or hand-written configuration per learning commit.
 
-The implementation diff budget does **not** apply to prompts, research findings, documentation/notes, data fixtures, lock files, generated files, exported NiFi definitions, or machine-generated metadata. These should still be kept purposeful and readable, and generated material must be reported separately rather than used to hide implementation complexity.
+The implementation diff budget does **not** apply to prompts, research findings, documentation/notes, data fixtures, lock files, generated files, exported NiFi definitions, or machine-generated metadata. These should still be kept purposeful and readable, and generated material must be reported separately rather than used to hide complexity.
 
 If an implementation change needs substantially more than 100 meaningful lines, split it or explain why the extra complexity is necessary to teach the concept.
 
